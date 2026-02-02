@@ -1,7 +1,7 @@
 {
   "name": "deperto (Alt+Scroll)",
   "description": "Realiza o zoom da tela a partir do ponto onde o mouse está usando Alt + Scroll (igual ao XFCE).",
-  "uuid": "deperto@sua-extensao.com",
+  "uuid": "deperto@dennisguim.com",
   "shell-version": [
     "45",
     "46",
