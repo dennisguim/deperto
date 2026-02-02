@@ -67,6 +67,12 @@ export default class ZoomByScrollExtension extends Extension {
 
         const type = event.type();
 
+        // Handle ESC (Reset Zoom)
+        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
+            this._settings.set_double('mag-factor', 1.0);
+            return Clutter.EVENT_STOP;
+        }
+
         // Filter only SCROLL (8)
         if (type !== Clutter.EventType.SCROLL) {
             return Clutter.EVENT_PROPAGATE;
