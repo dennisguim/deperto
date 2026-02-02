@@ -1,6 +1,5 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class ZoomByScrollExtension extends Extension {
@@ -44,23 +43,11 @@ export default class ZoomByScrollExtension extends Extension {
 
         // 3. Identifica a direção do scroll
         const direction = event.get_scroll_direction();
-        const magnifier = Main.magnifier;
         
-        // Obtém o fator de zoom atual da primeira região de zoom
-        let currentZoom = 1.0;
-        let regions = magnifier.getZoomRegions();
-        
-        if (regions.length > 0) {
-            let factors = regions[0].getMagFactor();
-            // getMagFactor returns an array [x, y] usually
-            if (Array.isArray(factors)) {
-                currentZoom = factors[0];
-            } else {
-                currentZoom = factors;
-            }
-        }
+        // Obtém o fator de zoom atual via GSettings
+        let currentZoom = this._settings.get_double('mag-factor');
 
-        const ZOOM_STEP = 0.25; // Adjusted step
+        const ZOOM_STEP = 0.25;
         let newZoom = currentZoom;
 
         if (direction === Clutter.ScrollDirection.UP) {
@@ -76,9 +63,7 @@ export default class ZoomByScrollExtension extends Extension {
         if (newZoom > 10.0) newZoom = 10.0;
 
         // 4. Aplica o Zoom
-        if (regions.length > 0) {
-            regions[0].setMagFactor(newZoom, newZoom);
-        }
+        this._settings.set_double('mag-factor', newZoom);
 
         // Retorna EVENT_STOP para que a janela abaixo não receba o scroll
         return Clutter.EVENT_STOP;
