@@ -48,12 +48,10 @@ export default class ZoomByScrollExtension extends Extension {
         }
 
         // 2. Verifica se a tecla ALT está pressionada
-        // No Wayland, o estado do evento pode ser inconsistente sobre janelas de apps.
-        // Usamos global.get_pointer() como fallback para garantir a leitura correta dos modificadores.
+        // Em versoes mais novas do GNOME (45+), global.get_pointer foi removido/depreciado.
+        // Devemos confiar no event.get_state().
         const state = event.get_state();
-        const [x, y, mods] = global.get_pointer();
-        const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) !== 0 || 
-                             (mods & Clutter.ModifierType.MOD1_MASK) !== 0;
+        const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
 
         if (!isAltPressed) {
             return Clutter.EVENT_PROPAGATE;
