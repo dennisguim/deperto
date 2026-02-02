@@ -10,9 +10,15 @@ export default class ZoomByScrollExtension extends Extension {
         
         // 1. Magnifier Settings
         this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
+        
+        // Save original state to restore later
+        this._originalMagnifierEnabled = this._a11ySettings.get_boolean('screen-magnifier-enabled');
         this._a11ySettings.set_boolean('screen-magnifier-enabled', true);
 
         this._settings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.magnifier' });
+        
+        // Save original tracking mode
+        this._originalMouseTracking = this._settings.get_enum('mouse-tracking');
         this._settings.set_enum('mouse-tracking', 2); // 2 = proportional
 
         const handler = this._handleEvent.bind(this);
@@ -30,8 +36,6 @@ export default class ZoomByScrollExtension extends Extension {
                 id: global.window_group.connect('captured-event', handler)
             });
         }
-
-        console.log("Deperto: Ready. Use SUPER+Scroll to zoom.");
     }
 
     disable() {
@@ -39,9 +43,17 @@ export default class ZoomByScrollExtension extends Extension {
             signal.object.disconnect(signal.id);
         });
         this._signals = [];
-        this._settings = null;
-        this._a11ySettings = null;
-        console.log("Deperto: Disabled.");
+        
+        // Restore original settings
+        if (this._a11ySettings) {
+            this._a11ySettings.set_boolean('screen-magnifier-enabled', this._originalMagnifierEnabled);
+            this._a11ySettings = null;
+        }
+
+        if (this._settings) {
+            this._settings.set_enum('mouse-tracking', this._originalMouseTracking);
+            this._settings = null;
+        }
     }
 
     _handleEvent(actor, event) {
@@ -54,13 +66,6 @@ export default class ZoomByScrollExtension extends Extension {
         }
 
         const type = event.type();
-
-        // DIAGNOSTIC LOG (Only if not motion)
-        if (type !== Clutter.EventType.MOTION && type !== 28 && type !== 29) {
-             // Ignoring Motion(3), TouchpadSwipe(28), TouchpadPinch(29) to clean the log
-             // If you want to see scroll (8), it will pass here.
-             console.log(`Deperto DIAG: Event ${type} with SUPER modifier`);
-        }
 
         // Filter only SCROLL (8)
         if (type !== Clutter.EventType.SCROLL) {
@@ -97,8 +102,6 @@ export default class ZoomByScrollExtension extends Extension {
         // Minimum threshold
         if (Math.abs(zoomChange) < 0.005) return Clutter.EVENT_STOP;
         
-        console.log(`Deperto ZOOM: Applying change ${zoomChange.toFixed(3)}`);
-
         let currentZoom = this._settings.get_double('mag-factor');
         let newZoom = Math.max(1.0, Math.min(20.0, currentZoom + zoomChange));
 
