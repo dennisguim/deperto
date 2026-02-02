@@ -26,9 +26,6 @@ export default class ZoomByScrollExtension extends Extension {
             this._eventHandlerId = null;
         }
         this._settings = null;
-        
-        // Opcional: Desativar o zoom ao desligar a extensão
-        // Main.magnifier.setZoom(1.0);
     }
 
     _handleEvent(event) {
@@ -52,17 +49,26 @@ export default class ZoomByScrollExtension extends Extension {
         // Obtém o fator de zoom atual da primeira região de zoom
         let currentZoom = 1.0;
         let regions = magnifier.getZoomRegions();
+        
         if (regions.length > 0) {
-            currentZoom = regions[0].getMagFactor();
+            let factors = regions[0].getMagFactor();
+            // getMagFactor returns an array [x, y] usually
+            if (Array.isArray(factors)) {
+                currentZoom = factors[0];
+            } else {
+                currentZoom = factors;
+            }
         }
 
-        const ZOOM_STEP = 0.2;
+        const ZOOM_STEP = 0.25; // Adjusted step
         let newZoom = currentZoom;
 
         if (direction === Clutter.ScrollDirection.UP) {
             newZoom += ZOOM_STEP;
         } else if (direction === Clutter.ScrollDirection.DOWN) {
             newZoom -= ZOOM_STEP;
+        } else {
+            return Clutter.EVENT_PROPAGATE;
         }
 
         // Limites
@@ -70,8 +76,9 @@ export default class ZoomByScrollExtension extends Extension {
         if (newZoom > 10.0) newZoom = 10.0;
 
         // 4. Aplica o Zoom
-        // O GNOME automaticamente foca no cursor se o mouse-tracking estiver configurado
-        magnifier.setZoom(newZoom);
+        if (regions.length > 0) {
+            regions[0].setMagFactor(newZoom, newZoom);
+        }
 
         // Retorna EVENT_STOP para que a janela abaixo não receba o scroll
         return Clutter.EVENT_STOP;
