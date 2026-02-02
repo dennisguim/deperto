@@ -6,17 +6,29 @@ export default class ZoomByScrollExtension extends Extension {
     enable() {
         this._eventHandlerId = null;
         
+        // Garante que a lupa esteja ativada no sistema (Acessibilidade)
+        this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
+        this._a11ySettings.set_boolean('screen-magnifier-enabled', true);
+
         // Configura o comportamento da lupa para seguir o mouse (Essencial para o efeito XFCE)
         this._settings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.magnifier' });
         
-        // Opções: 'none', 'centered', 'proportional', 'push'
-        // 'proportional' ou 'centered' dão o efeito de zoom no ponto do mouse
-        this._settings.set_enum('mouse-tracking', 2); // 2 = proportional
+        // Opções de mouse-tracking: 'none' (0), 'centered' (1), 'proportional' (2), 'push' (3)
+        // 2 (proportional) é o que mais se aproxima do comportamento do XFCE
+        this._settings.set_enum('mouse-tracking', 2);
 
-        // Conecta ao estágio global para capturar eventos de input
+        // Conecta ao estágio global para capturar eventos de input antes de qualquer outro ator
+        // O uso de 'captured-event' no 'global.stage' é a forma mais robusta de interceptação global
         this._eventHandlerId = global.stage.connect('captured-event', (actor, event) => {
-            return this._handleEvent(event);
+            try {
+                return this._handleEvent(event);
+            } catch (e) {
+                console.error(`Deperto Error: ${e}`);
+                return Clutter.EVENT_PROPAGATE;
+            }
         });
+        
+        console.log("Deperto (Zoom by Scroll): Extensão iniciada com sucesso.");
     }
 
     disable() {
@@ -25,47 +37,60 @@ export default class ZoomByScrollExtension extends Extension {
             this._eventHandlerId = null;
         }
         this._settings = null;
+        this._a11ySettings = null;
+        console.log("Deperto (Zoom by Scroll): Extensão desativada.");
     }
 
     _handleEvent(event) {
-        // 1. Verifica se é um evento de Scroll
+        // 1. Filtra apenas eventos de Scroll
         if (event.type() !== Clutter.EventType.SCROLL) {
             return Clutter.EVENT_PROPAGATE;
         }
 
         // 2. Verifica se a tecla ALT está pressionada
+        // No Wayland, o estado do evento pode ser inconsistente sobre janelas de apps.
+        // Usamos global.get_pointer() como fallback para garantir a leitura correta dos modificadores.
         const state = event.get_state();
-        const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
+        const [x, y, mods] = global.get_pointer();
+        const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) !== 0 || 
+                             (mods & Clutter.ModifierType.MOD1_MASK) !== 0;
 
         if (!isAltPressed) {
             return Clutter.EVENT_PROPAGATE;
         }
 
-        // 3. Identifica a direção do scroll
+        // 3. Identifica a direção e intensidade do scroll
         const direction = event.get_scroll_direction();
-        
-        // Obtém o fator de zoom atual via GSettings
-        let currentZoom = this._settings.get_double('mag-factor');
-
+        let zoomChange = 0;
         const ZOOM_STEP = 0.25;
-        let newZoom = currentZoom;
 
         if (direction === Clutter.ScrollDirection.UP) {
-            newZoom += ZOOM_STEP;
+            zoomChange = ZOOM_STEP;
         } else if (direction === Clutter.ScrollDirection.DOWN) {
-            newZoom -= ZOOM_STEP;
+            zoomChange = -ZOOM_STEP;
+        } else if (direction === Clutter.ScrollDirection.SMOOTH) {
+            const [dx, dy] = event.get_scroll_delta();
+            // dy < 0 é scroll para cima (zoom in), dy > 0 é scroll para baixo (zoom out)
+            zoomChange = -dy * ZOOM_STEP; 
         } else {
             return Clutter.EVENT_PROPAGATE;
         }
 
-        // Limites
-        if (newZoom < 1.0) newZoom = 1.0;
-        if (newZoom > 10.0) newZoom = 10.0;
+        // Se a mudança for insignificante, ignora para evitar jitter
+        if (Math.abs(zoomChange) < 0.005) {
+             return Clutter.EVENT_PROPAGATE;
+        }
+        
+        // 4. Calcula e aplica o novo fator de Zoom
+        let currentZoom = this._settings.get_double('mag-factor');
+        let newZoom = Math.max(1.0, Math.min(10.0, currentZoom + zoomChange));
 
-        // 4. Aplica o Zoom
-        this._settings.set_double('mag-factor', newZoom);
+        if (newZoom !== currentZoom) {
+            this._settings.set_double('mag-factor', newZoom);
+            // Retorna EVENT_STOP para que o app sob o mouse não receba o scroll
+            return Clutter.EVENT_STOP;
+        }
 
-        // Retorna EVENT_STOP para que a janela abaixo não receba o scroll
-        return Clutter.EVENT_STOP;
+        return Clutter.EVENT_PROPAGATE;
     }
 }
