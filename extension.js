@@ -57,20 +57,23 @@ export default class ZoomByScrollExtension extends Extension {
     }
 
     _handleEvent(actor, event) {
-        // Check Modifiers (SUPER only)
+        const type = event.type();
+
+        // Handle ESC (Reset Zoom) - Works without Super if zoomed in
+        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
+            const currentZoom = this._settings.get_double('mag-factor');
+            if (currentZoom > 1.0) {
+                this._settings.set_double('mag-factor', 1.0);
+                return Clutter.EVENT_STOP;
+            }
+        }
+
+        // Check Modifiers (SUPER only) for Scrolling
         const state = event.get_state();
         const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) !== 0; // Windows/Command key
 
         if (!isSuperPressed) {
             return Clutter.EVENT_PROPAGATE;
-        }
-
-        const type = event.type();
-
-        // Handle ESC (Reset Zoom)
-        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
-            this._settings.set_double('mag-factor', 1.0);
-            return Clutter.EVENT_STOP;
         }
 
         // Filter only SCROLL (8)
