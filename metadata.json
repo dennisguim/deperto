@@ -1,6 +1,6 @@
 {
   "name": "Deperto (Zoom by Scroll)",
-  "description": "Zoom na tela focado no mouse usando Alt + Scroll. Projeto Deperto.",
+  "description": "Zoom na tela focado no mouse usando Super + Scroll. Projeto Deperto.",
   "uuid": "deperto@dennisguim.com",
   "shell-version": [
     "45",

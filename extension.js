@@ -4,85 +4,108 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class ZoomByScrollExtension extends Extension {
     enable() {
-        console.log("Deperto (Zoom): Enabling extension...");
-        this._eventHandlerId = null;
+        console.log("Deperto: Activating V6 (Super+Scroll only)...");
+        this._signals = [];
+        this._lastSmoothScrollTime = 0; // To fix double zoom
         
-        // 1. Ensure Magnifier is enabled
+        // 1. Magnifier Settings
         this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
         this._a11ySettings.set_boolean('screen-magnifier-enabled', true);
 
-        // 2. Configure Magnifier to follow mouse (Essential for XFCE effect)
         this._settings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.magnifier' });
         this._settings.set_enum('mouse-tracking', 2); // 2 = proportional
 
-        // 3. Connect to the Global Stage (The Root of all input)
-        // We use a lambda to ensure 'this' context and correct argument handling
-        this._eventHandlerId = global.stage.connect('captured-event', (actor, event) => {
-            return this._handleEvent(actor, event);
+        const handler = this._handleEvent.bind(this);
+
+        // 2. Connect to Stage (Global)
+        this._signals.push({
+            object: global.stage,
+            id: global.stage.connect('captured-event', handler)
         });
 
-        console.log("Deperto (Zoom): Connected to global.stage (Universal Capture).");
+        // 3. Connect to Window Group (Windows)
+        if (global.window_group) {
+            this._signals.push({
+                object: global.window_group,
+                id: global.window_group.connect('captured-event', handler)
+            });
+        }
+
+        console.log("Deperto: Ready. Use SUPER+Scroll to zoom.");
     }
 
     disable() {
-        if (this._eventHandlerId) {
-            global.stage.disconnect(this._eventHandlerId);
-            this._eventHandlerId = null;
-        }
+        this._signals.forEach(signal => {
+            signal.object.disconnect(signal.id);
+        });
+        this._signals = [];
         this._settings = null;
         this._a11ySettings = null;
-        console.log("Deperto (Zoom): Disabled.");
+        console.log("Deperto: Disabled.");
     }
 
     _handleEvent(actor, event) {
-        // 1. Filter: Only care about SCROLL events
-        if (event.type() !== Clutter.EventType.SCROLL) {
-            return Clutter.EVENT_PROPAGATE;
-        }
-
-        // 2. Filter: Check for ALT key (Mod1)
+        // Check Modifiers (SUPER only)
         const state = event.get_state();
-        const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
+        const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) !== 0; // Windows/Command key
 
-        if (!isAltPressed) {
+        if (!isSuperPressed) {
             return Clutter.EVENT_PROPAGATE;
         }
 
-        // Debug Log: If we get here, we successfully intercepted an Alt+Scroll
-        // This helps us prove if Wayland is blocking us or if it's just a logic bug.
-        console.log(`Deperto: Alt+Scroll detected over actor: ${actor}`);
+        const type = event.type();
 
-        // 3. Calculate Zoom
+        // DIAGNOSTIC LOG (Only if not motion)
+        if (type !== Clutter.EventType.MOTION && type !== 28 && type !== 29) {
+             // Ignoring Motion(3), TouchpadSwipe(28), TouchpadPinch(29) to clean the log
+             // If you want to see scroll (8), it will pass here.
+             console.log(`Deperto DIAG: Event ${type} with SUPER modifier`);
+        }
+
+        // Filter only SCROLL (8)
+        if (type !== Clutter.EventType.SCROLL) {
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        // --- ZOOM LOGIC ---
         const direction = event.get_scroll_direction();
         let zoomChange = 0;
         const ZOOM_STEP = 0.25;
+        const now = Date.now();
 
-        if (direction === Clutter.ScrollDirection.UP) {
-            zoomChange = ZOOM_STEP;
-        } else if (direction === Clutter.ScrollDirection.DOWN) {
-            zoomChange = -ZOOM_STEP;
-        } else if (direction === Clutter.ScrollDirection.SMOOTH) {
+        // Scroll Detection
+        if (direction === Clutter.ScrollDirection.SMOOTH) {
             const [dx, dy] = event.get_scroll_delta();
-            // Invert dy because scrolling down (positive) usually means "next page", 
-            // but for zoom we want "pull back" (zoom out).
+            // Invert dy to be natural (Scroll Down = Zoom Out)
             zoomChange = -dy * ZOOM_STEP; 
+            this._lastSmoothScrollTime = now;
+        } else {
+            // If UP/DOWN (Discrete)
+            // CHECK: If we had a SMOOTH event very recently (e.g. < 50ms), ignore this discrete event
+            // This fixes the "double jump" problem on modern mice.
+            if (now - this._lastSmoothScrollTime < 50) {
+                 return Clutter.EVENT_STOP; 
+            }
+
+            if (direction === Clutter.ScrollDirection.UP) {
+                zoomChange = ZOOM_STEP;
+            } else if (direction === Clutter.ScrollDirection.DOWN) {
+                zoomChange = -ZOOM_STEP;
+            }
         }
 
-        // Ignore tiny movements (touchpad noise)
-        if (Math.abs(zoomChange) < 0.005) {
-             return Clutter.EVENT_PROPAGATE;
-        }
+        // Minimum threshold
+        if (Math.abs(zoomChange) < 0.005) return Clutter.EVENT_STOP;
         
-        // 4. Apply Zoom
+        console.log(`Deperto ZOOM: Applying change ${zoomChange.toFixed(3)}`);
+
         let currentZoom = this._settings.get_double('mag-factor');
-        let newZoom = Math.max(1.0, Math.min(10.0, currentZoom + zoomChange));
+        let newZoom = Math.max(1.0, Math.min(20.0, currentZoom + zoomChange));
 
         if (newZoom !== currentZoom) {
             this._settings.set_double('mag-factor', newZoom);
-            // CRITICAL: Stop the event so the window doesn't scroll too
-            return Clutter.EVENT_STOP;
         }
 
-        return Clutter.EVENT_PROPAGATE;
+        return Clutter.EVENT_STOP;
     }
 }
