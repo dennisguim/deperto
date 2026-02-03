@@ -190,14 +190,58 @@ export default class ZoomByScrollExtension extends Extension {
 
     _handleEvent(actor, event) {
         const type = event.type();
+        const symbol = event.get_key_symbol();
 
         // Handle ESC (Reset Zoom) - Works without modifier if zoomed in
-        if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
+        if (type === Clutter.EventType.KEY_PRESS && symbol === Clutter.KEY_Escape) {
             const currentZoom = this._settings.get_double('mag-factor');
             if (currentZoom > 1.0) {
                 this._settings.set_double('mag-factor', 1.0);
                 return Clutter.EVENT_STOP;
             }
+        }
+
+        // --- DYNAMIC MODIFIER SWITCHING ---
+        // Requested behavior:
+        // If Zoom is Alt-based, holding Super switches WM Action Key to <Super>.
+        // If Zoom is Super-based, holding Alt switches WM Action Key to <Alt>.
+        if (type === Clutter.EventType.KEY_PRESS || type === Clutter.EventType.KEY_RELEASE) {
+             const modKey = this._extensionSettings.get_string('modifier-key');
+             const isPress = (type === Clutter.EventType.KEY_PRESS);
+             const currentWm = this._wmSettings.get_string('mouse-button-modifier');
+
+             // Check for Super (Left/Right)
+             if (symbol === Clutter.KEY_Super_L || symbol === Clutter.KEY_Super_R) {
+                 // If configuration is Alt-based (Alt, Ctrl-Alt, Shift-Alt)
+                 if (modKey === 'alt' || modKey === 'ctrl-alt' || modKey === 'shift-alt') {
+                      if (isPress) {
+                          if (currentWm !== '<Super>') {
+                              this._wmSettings.set_string('mouse-button-modifier', '<Super>');
+                          }
+                      } else {
+                          // On release, revert to <Alt> (default for this config)
+                          if (currentWm !== '<Alt>') {
+                              this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
+                          }
+                      }
+                 }
+             }
+             // Check for Alt (Left/Right)
+             else if (symbol === Clutter.KEY_Alt_L || symbol === Clutter.KEY_Alt_R) {
+                 // If configuration is Super-based (Super, Ctrl-Super, Shift-Super)
+                 if (modKey === 'super' || modKey === 'ctrl-super' || modKey === 'shift-super') {
+                      if (isPress) {
+                          if (currentWm !== '<Alt>') {
+                              this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
+                          }
+                      } else {
+                          // On release, revert to <Super> (default for this config)
+                          if (currentWm !== '<Super>') {
+                              this._wmSettings.set_string('mouse-button-modifier', '<Super>');
+                          }
+                      }
+                 }
+             }
         }
 
         // Check Modifiers for Scrolling
