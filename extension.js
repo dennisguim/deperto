@@ -133,9 +133,10 @@ export default class ZoomByScrollExtension extends Extension {
 
     _switchWorkspace(event) {
         const now = Date.now();
-        // Debounce: 250ms to prevent rapid switching
-        if (now - this._lastWorkspaceSwitchTime < 250) {
-            return;
+        
+        // Reset accumulator if too much time has passed (e.g. user stopped scrolling)
+        if (now - this._lastWorkspaceSwitchTime > 200) {
+            this._scrollAccumulator = 0;
         }
 
         const direction = event.get_scroll_direction();
@@ -143,27 +144,47 @@ export default class ZoomByScrollExtension extends Extension {
         const activeIndex = wsManager.get_active_workspace_index();
         const nWorkspaces = wsManager.get_n_workspaces();
         let newIndex = activeIndex;
+        let didSwitch = false;
 
         if (direction === Clutter.ScrollDirection.UP) {
             newIndex--;
+            didSwitch = true;
         } else if (direction === Clutter.ScrollDirection.DOWN) {
             newIndex++;
+            didSwitch = true;
         } else if (direction === Clutter.ScrollDirection.SMOOTH) {
              const [dx, dy] = event.get_scroll_delta();
-             // Threshold to ignore tiny accidental scrolls
-             if (Math.abs(dy) < 5.0) return; 
              
-             if (dy < 0) newIndex--; // Scroll Up -> Prev
-             else if (dy > 0) newIndex++; // Scroll Down -> Next
+             // Accumulate delta
+             if (!this._scrollAccumulator) this._scrollAccumulator = 0;
+             this._scrollAccumulator += dy;
+
+             // Threshold for smooth scroll switching
+             // Standard mouse wheel notch is often around 10.0 or more in total delta
+             // Touchpads can be smaller. 
+             const THRESHOLD = 7.0; 
+
+             if (this._scrollAccumulator <= -THRESHOLD) {
+                 newIndex--; // Scroll Up -> Prev
+                 this._scrollAccumulator = 0; // Reset after switch
+                 didSwitch = true;
+             } else if (this._scrollAccumulator >= THRESHOLD) {
+                 newIndex++; // Scroll Down -> Next
+                 this._scrollAccumulator = 0; // Reset after switch
+                 didSwitch = true;
+             }
         }
         
-        // Clamp to valid range
-        if (newIndex < 0) newIndex = 0;
-        if (newIndex >= nWorkspaces) newIndex = nWorkspaces - 1;
+        if (didSwitch) {
+            // Clamp to valid range
+            if (newIndex < 0) newIndex = 0;
+            if (newIndex >= nWorkspaces) newIndex = nWorkspaces - 1;
 
-        if (newIndex !== activeIndex) {
-            wsManager.get_workspace_by_index(newIndex).activate(global.get_current_time());
-            this._lastWorkspaceSwitchTime = now;
+            if (newIndex !== activeIndex) {
+                // Use current time for activation to ensure focus handling is correct
+                wsManager.get_workspace_by_index(newIndex).activate(global.get_current_time());
+                this._lastWorkspaceSwitchTime = now;
+            }
         }
     }
 
@@ -183,28 +204,32 @@ export default class ZoomByScrollExtension extends Extension {
         const state = event.get_state();
 
         // WORKSPACE SWITCHING LOGIC (Conflict Resolution)
-        // 1. If Zoom uses 'super', we map 'Alt+Scroll' to Workspace Switch.
-        // 2. If Zoom uses 'alt' (and not super), we map 'Super+Scroll' to Workspace Switch.
+        // We capture this BEFORE the zoom check to ensure we catch the "Other" key.
         if (type === Clutter.EventType.SCROLL) {
             const modKey = this._extensionSettings.get_string('modifier-key');
             const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) === Clutter.ModifierType.MOD1_MASK;
             const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) === Clutter.ModifierType.MOD4_MASK;
 
+            let isWorkspaceSwitchIntent = false;
+
             // Case 1: Zoom is Super-based. Fallback: Alt+Scroll -> Workspace
             if (modKey === 'super') {
                 if (isAltPressed && !isSuperPressed) {
-                     this._switchWorkspace(event);
-                     return Clutter.EVENT_STOP;
+                     isWorkspaceSwitchIntent = true;
                 }
             }
             // Case 2: Zoom is Alt-based (and NO Super). Fallback: Super+Scroll -> Workspace
             else if (modKey.includes('alt') && !modKey.includes('super')) {
-                 // If Super is pressed (and Alt is NOT pressed, to avoid conflict if Zoom is Alt), switch workspace.
-                 // We enforce !isAltPressed because if Alt is pressed, it should be Zoom (since modifierKey involves Alt).
                  if (isSuperPressed && !isAltPressed) {
-                      this._switchWorkspace(event);
-                      return Clutter.EVENT_STOP;
+                      isWorkspaceSwitchIntent = true;
                  }
+            }
+
+            if (isWorkspaceSwitchIntent) {
+                 this._switchWorkspace(event);
+                 // ALWAYS return STOP if the intent matches, even if we didn't switch yet (accumulator logic).
+                 // This prevents the scroll from "leaking" to the window focused below.
+                 return Clutter.EVENT_STOP;
             }
         }
         
