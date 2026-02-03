@@ -4,7 +4,7 @@
     <key name="modifier-key" type="s">
       <default>'super'</default>
       <summary>Modifier key to activate zoom</summary>
-      <description>The key that must be held down while scrolling to zoom. Options: super, alt, ctrl.</description>
+      <description>The key combination to hold while scrolling to zoom. Options: super, alt, super-alt, shift-super, shift-alt, ctrl-super, ctrl-alt.</description>
     </key>
   </schema>
 </schemalist>

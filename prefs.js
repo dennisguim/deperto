@@ -20,18 +20,25 @@ export default class ZoomByScrollPreferences extends ExtensionPreferences {
         page.add(group);
 
         // Create the combo row for modifier key
-        // We will offer Super, Alt, and Ctrl
         const row = new Adw.ComboRow({
-            title: _('Modifier Key'),
-            subtitle: _('Key to hold while scrolling to zoom'),
+            title: _('Activation Shortcut'),
+            subtitle: _('Key combination to hold while scrolling'),
             model: new Gtk.StringList({
-                strings: ['Super (Windows/Command)', 'Alt', 'Ctrl']
+                strings: [
+                    'Super + Scroll',
+                    'Alt + Scroll',
+                    'Super + Alt + Scroll',
+                    'Shift + Super + Scroll',
+                    'Shift + Alt + Scroll',
+                    'Ctrl + Super + Scroll',
+                    'Ctrl + Alt + Scroll'
+                ]
             }),
         });
         group.add(row);
 
         // Map the index to the string value in GSettings
-        const items = ['super', 'alt', 'ctrl'];
+        const items = ['super', 'alt', 'super-alt', 'shift-super', 'shift-alt', 'ctrl-super', 'ctrl-alt'];
 
         // Set initial selection from current settings
         const current = settings.get_string('modifier-key');

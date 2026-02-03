@@ -10,12 +10,17 @@ export default class ZoomByScrollExtension extends Extension {
         
         // 1. Extension Settings (Preferences)
         this._extensionSettings = this.getSettings();
+        
+        // 2. Window Manager Settings (To fix conflict)
+        this._wmSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.wm.preferences' });
+        this._originalWmModifier = this._wmSettings.get_string('mouse-button-modifier');
+
         this._updateModifierMask();
         this._settingsSignalId = this._extensionSettings.connect('changed::modifier-key', () => {
             this._updateModifierMask();
         });
 
-        // 2. Magnifier Settings
+        // 3. Magnifier Settings
         this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
         
         // Save original state to restore later
@@ -30,13 +35,13 @@ export default class ZoomByScrollExtension extends Extension {
 
         const handler = this._handleEvent.bind(this);
 
-        // 3. Connect to Stage (Global)
+        // 4. Connect to Stage (Global)
         this._signals.push({
             object: global.stage,
             id: global.stage.connect('captured-event', handler)
         });
 
-        // 4. Connect to Window Group (Windows)
+        // 5. Connect to Window Group (Windows)
         if (global.window_group) {
             this._signals.push({
                 object: global.window_group,
@@ -67,21 +72,61 @@ export default class ZoomByScrollExtension extends Extension {
             this._settings.set_enum('mouse-tracking', this._originalMouseTracking);
             this._settings = null;
         }
+
+        // Restore WM settings
+        if (this._wmSettings) {
+            this._wmSettings.set_string('mouse-button-modifier', this._originalWmModifier);
+            this._wmSettings = null;
+        }
     }
 
     _updateModifierMask() {
         const key = this._extensionSettings.get_string('modifier-key');
         switch (key) {
             case 'alt':
-                this._modifierMask = Clutter.ModifierType.MOD1_MASK;
+                this._requiredModifiers = Clutter.ModifierType.MOD1_MASK;
                 break;
-            case 'ctrl':
-                this._modifierMask = Clutter.ModifierType.CONTROL_MASK;
+            case 'super-alt':
+                this._requiredModifiers = Clutter.ModifierType.MOD4_MASK | Clutter.ModifierType.MOD1_MASK;
+                break;
+            case 'shift-super':
+                this._requiredModifiers = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD4_MASK;
+                break;
+            case 'shift-alt':
+                this._requiredModifiers = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK;
+                break;
+            case 'ctrl-super':
+                this._requiredModifiers = Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD4_MASK;
+                break;
+            case 'ctrl-alt':
+                this._requiredModifiers = Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD1_MASK;
                 break;
             case 'super':
             default:
-                this._modifierMask = Clutter.ModifierType.MOD4_MASK;
+                this._requiredModifiers = Clutter.ModifierType.MOD4_MASK;
                 break;
+        }
+        console.log(`[Deperto] New modifier mask set for '${key}': ${this._requiredModifiers}`);
+
+        // Sync Window Manager Action Key
+        // Per user requirement: To make zoom work over windows, the WM action key
+        // must MATCH the zoom modifier (or at least one of them).
+        // If Super is involved -> Set WM to Super.
+        // If Alt is involved (and no Super) -> Set WM to Alt.
+        
+        const currentWm = this._wmSettings.get_string('mouse-button-modifier');
+        
+        if (key.includes('super')) {
+            if (currentWm !== '<Super>') {
+                console.log("[Deperto] Adjusting WM key to <Super> to match extension shortcut.");
+                this._wmSettings.set_string('mouse-button-modifier', '<Super>');
+            }
+        } else {
+            // Defaults to Alt logic (for 'alt', 'ctrl-alt', 'shift-alt')
+            if (currentWm !== '<Alt>') {
+                console.log("[Deperto] Adjusting WM key to <Alt> to match extension shortcut.");
+                this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
+            }
         }
     }
 
@@ -89,7 +134,6 @@ export default class ZoomByScrollExtension extends Extension {
         const type = event.type();
 
         // Handle ESC (Reset Zoom) - Works without modifier if zoomed in
-        // NOTE: We might want to make this strictly require modifier too, but for now leaving as is for quick exit.
         if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
             const currentZoom = this._settings.get_double('mag-factor');
             if (currentZoom > 1.0) {
@@ -100,7 +144,15 @@ export default class ZoomByScrollExtension extends Extension {
 
         // Check Modifiers for Scrolling
         const state = event.get_state();
-        const isModifierPressed = (state & this._modifierMask) !== 0;
+        
+        // We check if ALL required bits are present in the state
+        // (state & required) === required
+        const isModifierPressed = (state & this._requiredModifiers) === this._requiredModifiers;
+
+        // DEBUG: Uncomment if needed
+        // if (type === Clutter.EventType.SCROLL) {
+        //    console.log(`[Deperto] Scroll. State: ${state}, Required: ${this._requiredModifiers}, Match: ${isModifierPressed}`);
+        // }
 
         if (!isModifierPressed) {
             return Clutter.EVENT_PROPAGATE;
