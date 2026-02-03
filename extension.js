@@ -203,44 +203,41 @@ export default class ZoomByScrollExtension extends Extension {
 
         // --- DYNAMIC MODIFIER SWITCHING ---
         // Requested behavior:
-        // If Zoom is Alt-based, holding Super switches WM Action Key to <Super>.
-        // If Zoom is Super-based, holding Alt switches WM Action Key to <Alt>.
+        // Super -> Window Action Key = <Super>
+        // Alt -> Window Action Key = <Alt>
+        // Super + Alt -> Window Action Key = <Alt> (Alt takes precedence)
         if (type === Clutter.EventType.KEY_PRESS || type === Clutter.EventType.KEY_RELEASE) {
-             const modKey = this._extensionSettings.get_string('modifier-key');
              const isPress = (type === Clutter.EventType.KEY_PRESS);
-             const currentWm = this._wmSettings.get_string('mouse-button-modifier');
+             const state = event.get_state();
 
-             // Check for Super (Left/Right)
-             if (symbol === Clutter.KEY_Super_L || symbol === Clutter.KEY_Super_R) {
-                 // If configuration is Alt-based (Alt, Ctrl-Alt, Shift-Alt)
-                 if (modKey === 'alt' || modKey === 'ctrl-alt' || modKey === 'shift-alt') {
-                      if (isPress) {
-                          if (currentWm !== '<Super>') {
-                              this._wmSettings.set_string('mouse-button-modifier', '<Super>');
-                          }
-                      } else {
-                          // On release, revert to <Alt> (default for this config)
-                          if (currentWm !== '<Alt>') {
-                              this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
-                          }
-                      }
-                 }
+             const isAltKey = (symbol === Clutter.KEY_Alt_L || symbol === Clutter.KEY_Alt_R);
+             const isSuperKey = (symbol === Clutter.KEY_Super_L || symbol === Clutter.KEY_Super_R);
+
+             // Calculate 'Real' State (State bitmask + current event)
+             const altWasDown = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
+             const superWasDown = (state & Clutter.ModifierType.MOD4_MASK) !== 0;
+
+             let altIsDown = altWasDown;
+             let superIsDown = superWasDown;
+
+             // Update state based on current key event
+             if (isAltKey) altIsDown = isPress;
+             if (isSuperKey) superIsDown = isPress;
+
+             const currentWm = this._wmSettings.get_string('mouse-button-modifier');
+             let targetWm = this._originalWmModifier;
+
+             // Logic: Super > Alt > Default
+             // "Se a tecla super for pressionada... muda pra super"
+             // "Se o alt for pressionado... muda pra alt"
+             if (superIsDown) {
+                 targetWm = '<Super>';
+             } else if (altIsDown) {
+                 targetWm = '<Alt>';
              }
-             // Check for Alt (Left/Right)
-             else if (symbol === Clutter.KEY_Alt_L || symbol === Clutter.KEY_Alt_R) {
-                 // If configuration is Super-based (Super, Ctrl-Super, Shift-Super)
-                 if (modKey === 'super' || modKey === 'ctrl-super' || modKey === 'shift-super') {
-                      if (isPress) {
-                          if (currentWm !== '<Alt>') {
-                              this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
-                          }
-                      } else {
-                          // On release, revert to <Super> (default for this config)
-                          if (currentWm !== '<Super>') {
-                              this._wmSettings.set_string('mouse-button-modifier', '<Super>');
-                          }
-                      }
-                 }
+
+             if (currentWm !== targetWm) {
+                 this._wmSettings.set_string('mouse-button-modifier', targetWm);
              }
         }
 
