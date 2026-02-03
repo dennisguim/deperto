@@ -183,16 +183,28 @@ export default class ZoomByScrollExtension extends Extension {
         const state = event.get_state();
 
         // WORKSPACE SWITCHING LOGIC (Conflict Resolution)
-        // If extension uses 'super' for Zoom, we hijack 'Alt+Scroll' to switch workspaces
-        // because 'Super+Scroll' is now taken by Zoom.
-        if (this._extensionSettings.get_string('modifier-key') === 'super' && type === Clutter.EventType.SCROLL) {
+        // 1. If Zoom uses 'super', we map 'Alt+Scroll' to Workspace Switch.
+        // 2. If Zoom uses 'alt' (and not super), we map 'Super+Scroll' to Workspace Switch.
+        if (type === Clutter.EventType.SCROLL) {
+            const modKey = this._extensionSettings.get_string('modifier-key');
             const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) === Clutter.ModifierType.MOD1_MASK;
-            // Ideally ensure Super is NOT pressed to distinctively identify this fallback interaction
             const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) === Clutter.ModifierType.MOD4_MASK;
 
-            if (isAltPressed && !isSuperPressed) {
-                 this._switchWorkspace(event);
-                 return Clutter.EVENT_STOP;
+            // Case 1: Zoom is Super-based. Fallback: Alt+Scroll -> Workspace
+            if (modKey === 'super') {
+                if (isAltPressed && !isSuperPressed) {
+                     this._switchWorkspace(event);
+                     return Clutter.EVENT_STOP;
+                }
+            }
+            // Case 2: Zoom is Alt-based (and NO Super). Fallback: Super+Scroll -> Workspace
+            else if (modKey.includes('alt') && !modKey.includes('super')) {
+                 // If Super is pressed (and Alt is NOT pressed, to avoid conflict if Zoom is Alt), switch workspace.
+                 // We enforce !isAltPressed because if Alt is pressed, it should be Zoom (since modifierKey involves Alt).
+                 if (isSuperPressed && !isAltPressed) {
+                      this._switchWorkspace(event);
+                      return Clutter.EVENT_STOP;
+                 }
             }
         }
         
