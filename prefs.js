@@ -19,42 +19,36 @@ export default class ZoomByScrollPreferences extends ExtensionPreferences {
         });
         page.add(group);
 
+        // Define the available options
+        const optionItems = ['super-alt', 'ctrl-super'];
+        const optionLabels = ['Super + Alt + Scroll', 'Ctrl + Super + Scroll'];
+
         // Create the combo row for modifier key
         const row = new Adw.ComboRow({
             title: _('Activation Shortcut'),
             subtitle: _('Key combination to hold while scrolling'),
             model: new Gtk.StringList({
-                strings: [
-                    'Super + Scroll',
-                    'Alt + Scroll',
-                    'Super + Alt + Scroll',
-                    'Shift + Super + Scroll',
-                    'Shift + Alt + Scroll',
-                    'Ctrl + Super + Scroll',
-                    'Ctrl + Alt + Scroll'
-                ]
+                strings: optionLabels
             }),
         });
         group.add(row);
 
-        // Map the index to the string value in GSettings
-        const items = ['super', 'alt', 'super-alt', 'shift-super', 'shift-alt', 'ctrl-super', 'ctrl-alt'];
-
         // Set initial selection from current settings
         const current = settings.get_string('modifier-key');
-        const index = items.indexOf(current);
-        if (index !== -1) {
-            row.set_selected(index);
-        } else {
-            // Default to Super if unknown
-            row.set_selected(0);
+        let index = optionItems.indexOf(current);
+        
+        // If current setting is invalid or not in our new restricted list, default to first option (super-alt)
+        if (index === -1) {
+            index = 0;
+            settings.set_string('modifier-key', optionItems[0]);
         }
+        row.set_selected(index);
 
         // Connect signal to save setting when selection changes
         row.connect('notify::selected', () => {
             const selectedIndex = row.get_selected();
-            if (selectedIndex !== -1 && selectedIndex < items.length) {
-                settings.set_string('modifier-key', items[selectedIndex]);
+            if (selectedIndex !== -1 && selectedIndex < optionItems.length) {
+                settings.set_string('modifier-key', optionItems[selectedIndex]);
             }
         });
     }

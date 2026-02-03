@@ -4,7 +4,10 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class ZoomByScrollExtension extends Extension {
     enable() {
-        console.log("[Deperto] Enabling extension: Super + Alt + Scroll Zoom");
+        console.log("[Deperto] Enabling extension");
+
+        // 0. Carregar configurações da própria extensão
+        this._settings = this.getSettings();
 
         // 1. Configurar Gerenciador de Janelas (Forçar Super)
         this._wmSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.wm.preferences' });
@@ -55,6 +58,8 @@ export default class ZoomByScrollExtension extends Extension {
             this._a11ySettings.set_boolean('screen-magnifier-enabled', this._originalMagnifierEnabled);
             this._a11ySettings = null;
         }
+        
+        this._settings = null;
     }
 
     _onCapturedEvent(actor, event) {
@@ -64,13 +69,24 @@ export default class ZoomByScrollExtension extends Extension {
         }
 
         const state = event.get_state();
+        const selectedModifier = this._settings.get_string('modifier-key');
         
-        // Verifica modificadores: Precisamos de SUPER (Mod4) E ALT (Mod1)
         const hasSuper = (state & Clutter.ModifierType.MOD4_MASK) !== 0;
         const hasAlt = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
+        const hasCtrl = (state & Clutter.ModifierType.CONTROL_MASK) !== 0;
 
-        // Se não tiver a combinação exata Super + Alt, deixa o sistema lidar
-        if (!hasSuper || !hasAlt) {
+        let match = false;
+
+        // Verifica qual combinação o usuário escolheu
+        if (selectedModifier === 'ctrl-super') {
+            match = hasCtrl && hasSuper;
+        } else {
+            // Default: super-alt
+            match = hasSuper && hasAlt;
+        }
+
+        // Se não tiver a combinação exata, deixa o sistema lidar
+        if (!match) {
             return Clutter.EVENT_PROPAGATE;
         }
 
