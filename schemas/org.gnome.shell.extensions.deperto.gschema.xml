@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="deperto">
+  <schema id="org.gnome.shell.extensions.deperto" path="/org/gnome/shell/extensions/deperto/">
+    <key name="modifier-key" type="s">
+      <default>'super'</default>
+      <summary>Modifier key to activate zoom</summary>
+      <description>The key that must be held down while scrolling to zoom. Options: super, alt, ctrl.</description>
+    </key>
+  </schema>
+</schemalist>

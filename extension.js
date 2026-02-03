@@ -4,11 +4,18 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class ZoomByScrollExtension extends Extension {
     enable() {
-        console.log("Deperto: Activating V6 (Super+Scroll only)...");
+        console.log("Deperto: Activating (Customizable Modifier)...");
         this._signals = [];
         this._lastSmoothScrollTime = 0; // To fix double zoom
         
-        // 1. Magnifier Settings
+        // 1. Extension Settings (Preferences)
+        this._extensionSettings = this.getSettings();
+        this._updateModifierMask();
+        this._settingsSignalId = this._extensionSettings.connect('changed::modifier-key', () => {
+            this._updateModifierMask();
+        });
+
+        // 2. Magnifier Settings
         this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
         
         // Save original state to restore later
@@ -23,13 +30,13 @@ export default class ZoomByScrollExtension extends Extension {
 
         const handler = this._handleEvent.bind(this);
 
-        // 2. Connect to Stage (Global)
+        // 3. Connect to Stage (Global)
         this._signals.push({
             object: global.stage,
             id: global.stage.connect('captured-event', handler)
         });
 
-        // 3. Connect to Window Group (Windows)
+        // 4. Connect to Window Group (Windows)
         if (global.window_group) {
             this._signals.push({
                 object: global.window_group,
@@ -44,6 +51,12 @@ export default class ZoomByScrollExtension extends Extension {
         });
         this._signals = [];
         
+        // Disconnect settings signal
+        if (this._extensionSettings && this._settingsSignalId) {
+            this._extensionSettings.disconnect(this._settingsSignalId);
+            this._extensionSettings = null;
+        }
+
         // Restore original settings
         if (this._a11ySettings) {
             this._a11ySettings.set_boolean('screen-magnifier-enabled', this._originalMagnifierEnabled);
@@ -56,10 +69,27 @@ export default class ZoomByScrollExtension extends Extension {
         }
     }
 
+    _updateModifierMask() {
+        const key = this._extensionSettings.get_string('modifier-key');
+        switch (key) {
+            case 'alt':
+                this._modifierMask = Clutter.ModifierType.MOD1_MASK;
+                break;
+            case 'ctrl':
+                this._modifierMask = Clutter.ModifierType.CONTROL_MASK;
+                break;
+            case 'super':
+            default:
+                this._modifierMask = Clutter.ModifierType.MOD4_MASK;
+                break;
+        }
+    }
+
     _handleEvent(actor, event) {
         const type = event.type();
 
-        // Handle ESC (Reset Zoom) - Works without Super if zoomed in
+        // Handle ESC (Reset Zoom) - Works without modifier if zoomed in
+        // NOTE: We might want to make this strictly require modifier too, but for now leaving as is for quick exit.
         if (type === Clutter.EventType.KEY_PRESS && event.get_key_symbol() === Clutter.KEY_Escape) {
             const currentZoom = this._settings.get_double('mag-factor');
             if (currentZoom > 1.0) {
@@ -68,11 +98,11 @@ export default class ZoomByScrollExtension extends Extension {
             }
         }
 
-        // Check Modifiers (SUPER only) for Scrolling
+        // Check Modifiers for Scrolling
         const state = event.get_state();
-        const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) !== 0; // Windows/Command key
+        const isModifierPressed = (state & this._modifierMask) !== 0;
 
-        if (!isSuperPressed) {
+        if (!isModifierPressed) {
             return Clutter.EVENT_PROPAGATE;
         }
 
@@ -96,7 +126,6 @@ export default class ZoomByScrollExtension extends Extension {
         } else {
             // If UP/DOWN (Discrete)
             // CHECK: If we had a SMOOTH event very recently (e.g. < 50ms), ignore this discrete event
-            // This fixes the "double jump" problem on modern mice.
             if (now - this._lastSmoothScrollTime < 50) {
                  return Clutter.EVENT_STOP; 
             }
