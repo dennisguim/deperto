@@ -7,6 +7,7 @@ export default class ZoomByScrollExtension extends Extension {
         console.log("Deperto: Activating (Customizable Modifier)...");
         this._signals = [];
         this._lastSmoothScrollTime = 0; // To fix double zoom
+        this._lastWorkspaceSwitchTime = 0; // Debounce for workspace switching
         
         // 1. Extension Settings (Preferences)
         this._extensionSettings = this.getSettings();
@@ -130,6 +131,42 @@ export default class ZoomByScrollExtension extends Extension {
         }
     }
 
+    _switchWorkspace(event) {
+        const now = Date.now();
+        // Debounce: 250ms to prevent rapid switching
+        if (now - this._lastWorkspaceSwitchTime < 250) {
+            return;
+        }
+
+        const direction = event.get_scroll_direction();
+        const wsManager = global.workspace_manager;
+        const activeIndex = wsManager.get_active_workspace_index();
+        const nWorkspaces = wsManager.get_n_workspaces();
+        let newIndex = activeIndex;
+
+        if (direction === Clutter.ScrollDirection.UP) {
+            newIndex--;
+        } else if (direction === Clutter.ScrollDirection.DOWN) {
+            newIndex++;
+        } else if (direction === Clutter.ScrollDirection.SMOOTH) {
+             const [dx, dy] = event.get_scroll_delta();
+             // Threshold to ignore tiny accidental scrolls
+             if (Math.abs(dy) < 5.0) return; 
+             
+             if (dy < 0) newIndex--; // Scroll Up -> Prev
+             else if (dy > 0) newIndex++; // Scroll Down -> Next
+        }
+        
+        // Clamp to valid range
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex >= nWorkspaces) newIndex = nWorkspaces - 1;
+
+        if (newIndex !== activeIndex) {
+            wsManager.get_workspace_by_index(newIndex).activate(global.get_current_time());
+            this._lastWorkspaceSwitchTime = now;
+        }
+    }
+
     _handleEvent(actor, event) {
         const type = event.type();
 
@@ -144,6 +181,20 @@ export default class ZoomByScrollExtension extends Extension {
 
         // Check Modifiers for Scrolling
         const state = event.get_state();
+
+        // WORKSPACE SWITCHING LOGIC (Conflict Resolution)
+        // If extension uses 'super' for Zoom, we hijack 'Alt+Scroll' to switch workspaces
+        // because 'Super+Scroll' is now taken by Zoom.
+        if (this._extensionSettings.get_string('modifier-key') === 'super' && type === Clutter.EventType.SCROLL) {
+            const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) === Clutter.ModifierType.MOD1_MASK;
+            // Ideally ensure Super is NOT pressed to distinctively identify this fallback interaction
+            const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) === Clutter.ModifierType.MOD4_MASK;
+
+            if (isAltPressed && !isSuperPressed) {
+                 this._switchWorkspace(event);
+                 return Clutter.EVENT_STOP;
+            }
+        }
         
         // We check if ALL required bits are present in the state
         // (state & required) === required
