@@ -4,313 +4,86 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class ZoomByScrollExtension extends Extension {
     enable() {
-        console.log("Deperto: Activating (Customizable Modifier)...");
-        this._signals = [];
-        this._lastSmoothScrollTime = 0; // To fix double zoom
-        this._lastWorkspaceSwitchTime = 0; // Debounce for workspace switching
-        
-        // 1. Extension Settings (Preferences)
-        this._extensionSettings = this.getSettings();
-        
-        // 2. Window Manager Settings (To fix conflict)
+        console.log("[Deperto] Enabling extension: Super + Alt + Scroll Zoom");
+
+        // 1. Configurar Gerenciador de Janelas (Forçar Super)
         this._wmSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.wm.preferences' });
         this._originalWmModifier = this._wmSettings.get_string('mouse-button-modifier');
-
-        this._updateModifierMask();
-        this._settingsSignalId = this._extensionSettings.connect('changed::modifier-key', () => {
-            this._updateModifierMask();
-        });
-
-        // 3. Magnifier Settings
-        this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
         
-        // Save original state to restore later
+        // Define explicitamente para Super, permitindo que Alt fique livre para nossa combinação
+        this._wmSettings.set_string('mouse-button-modifier', '<Super>');
+
+        // 2. Configurar Magnifier (Zoom)
+        this._a11ySettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.applications' });
         this._originalMagnifierEnabled = this._a11ySettings.get_boolean('screen-magnifier-enabled');
+        // Garante que o recurso de magnifier esteja habilitado no sistema
         this._a11ySettings.set_boolean('screen-magnifier-enabled', true);
 
-        this._settings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.magnifier' });
-        
-        // Save original tracking mode
-        this._originalMouseTracking = this._settings.get_enum('mouse-tracking');
-        this._settings.set_enum('mouse-tracking', 2); // 2 = proportional
+        this._magSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.a11y.magnifier' });
+        this._originalMouseTracking = this._magSettings.get_enum('mouse-tracking');
+        // Força o modo 'proportional' para o zoom seguir o mouse
+        this._magSettings.set_enum('mouse-tracking', 2); 
 
-        const handler = this._handleEvent.bind(this);
-
-        // 4. Connect to Stage (Global)
-        this._signals.push({
-            object: global.stage,
-            id: global.stage.connect('captured-event', handler)
-        });
-
-        // 5. Connect to Window Group (Windows)
-        if (global.window_group) {
-            this._signals.push({
-                object: global.window_group,
-                id: global.window_group.connect('captured-event', handler)
-            });
-        }
+        // 3. Capturar Eventos
+        this._stageSignalId = global.stage.connect('captured-event', this._onCapturedEvent.bind(this));
     }
 
     disable() {
-        this._signals.forEach(signal => {
-            signal.object.disconnect(signal.id);
-        });
-        this._signals = [];
-        
-        // Disconnect settings signal
-        if (this._extensionSettings && this._settingsSignalId) {
-            this._extensionSettings.disconnect(this._settingsSignalId);
-            this._extensionSettings = null;
+        console.log("[Deperto] Disabling extension...");
+
+        // 1. Desconectar Eventos
+        if (this._stageSignalId) {
+            global.stage.disconnect(this._stageSignalId);
+            this._stageSignalId = null;
         }
 
-        // Restore original settings
+        // 2. Restaurar configurações originais
+        if (this._wmSettings) {
+            // Restaura a tecla de ação de janela anterior (ou mantém Super se falhar)
+            if (this._originalWmModifier) {
+                this._wmSettings.set_string('mouse-button-modifier', this._originalWmModifier);
+            }
+            this._wmSettings = null;
+        }
+
+        if (this._magSettings) {
+            this._magSettings.set_enum('mouse-tracking', this._originalMouseTracking);
+            this._magSettings = null;
+        }
+
         if (this._a11ySettings) {
             this._a11ySettings.set_boolean('screen-magnifier-enabled', this._originalMagnifierEnabled);
             this._a11ySettings = null;
         }
-
-        if (this._settings) {
-            this._settings.set_enum('mouse-tracking', this._originalMouseTracking);
-            this._settings = null;
-        }
-
-        // Restore WM settings
-        if (this._wmSettings) {
-            this._wmSettings.set_string('mouse-button-modifier', this._originalWmModifier);
-            this._wmSettings = null;
-        }
     }
 
-    _updateModifierMask() {
-        const key = this._extensionSettings.get_string('modifier-key');
-        switch (key) {
-            case 'alt':
-                this._requiredModifiers = Clutter.ModifierType.MOD1_MASK;
-                break;
-            case 'super-alt':
-                this._requiredModifiers = Clutter.ModifierType.MOD4_MASK | Clutter.ModifierType.MOD1_MASK;
-                break;
-            case 'shift-super':
-                this._requiredModifiers = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD4_MASK;
-                break;
-            case 'shift-alt':
-                this._requiredModifiers = Clutter.ModifierType.SHIFT_MASK | Clutter.ModifierType.MOD1_MASK;
-                break;
-            case 'ctrl-super':
-                this._requiredModifiers = Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD4_MASK;
-                break;
-            case 'ctrl-alt':
-                this._requiredModifiers = Clutter.ModifierType.CONTROL_MASK | Clutter.ModifierType.MOD1_MASK;
-                break;
-            case 'super':
-            default:
-                this._requiredModifiers = Clutter.ModifierType.MOD4_MASK;
-                break;
-        }
-        console.log(`[Deperto] New modifier mask set for '${key}': ${this._requiredModifiers}`);
-
-        // Sync Window Manager Action Key
-        // Per user requirement: To make zoom work over windows, the WM action key
-        // must MATCH the zoom modifier (or at least one of them).
-        // If Super is involved -> Set WM to Super.
-        // If Alt is involved (and no Super) -> Set WM to Alt.
-        
-        const currentWm = this._wmSettings.get_string('mouse-button-modifier');
-        
-        if (key.includes('super')) {
-            if (currentWm !== '<Super>') {
-                console.log("[Deperto] Adjusting WM key to <Super> to match extension shortcut.");
-                this._wmSettings.set_string('mouse-button-modifier', '<Super>');
-            }
-        } else {
-            // Defaults to Alt logic (for 'alt', 'ctrl-alt', 'shift-alt')
-            if (currentWm !== '<Alt>') {
-                console.log("[Deperto] Adjusting WM key to <Alt> to match extension shortcut.");
-                this._wmSettings.set_string('mouse-button-modifier', '<Alt>');
-            }
-        }
-    }
-
-    _switchWorkspace(event) {
-        const now = Date.now();
-        
-        // Reset accumulator if too much time has passed (e.g. user stopped scrolling)
-        if (now - this._lastWorkspaceSwitchTime > 200) {
-            this._scrollAccumulator = 0;
+    _onCapturedEvent(actor, event) {
+        // Só nos interessa evento de SCROLL
+        if (event.type() !== Clutter.EventType.SCROLL) {
+            return Clutter.EVENT_PROPAGATE;
         }
 
-        const direction = event.get_scroll_direction();
-        const wsManager = global.workspace_manager;
-        const activeIndex = wsManager.get_active_workspace_index();
-        const nWorkspaces = wsManager.get_n_workspaces();
-        let newIndex = activeIndex;
-        let didSwitch = false;
-
-        if (direction === Clutter.ScrollDirection.UP) {
-            newIndex--;
-            didSwitch = true;
-        } else if (direction === Clutter.ScrollDirection.DOWN) {
-            newIndex++;
-            didSwitch = true;
-        } else if (direction === Clutter.ScrollDirection.SMOOTH) {
-             const [dx, dy] = event.get_scroll_delta();
-             
-             // Accumulate delta
-             if (!this._scrollAccumulator) this._scrollAccumulator = 0;
-             this._scrollAccumulator += dy;
-
-             // Threshold for smooth scroll switching
-             // Standard mouse wheel notch is often around 10.0 or more in total delta
-             // Touchpads can be smaller. 
-             const THRESHOLD = 7.0; 
-
-             if (this._scrollAccumulator <= -THRESHOLD) {
-                 newIndex--; // Scroll Up -> Prev
-                 this._scrollAccumulator = 0; // Reset after switch
-                 didSwitch = true;
-             } else if (this._scrollAccumulator >= THRESHOLD) {
-                 newIndex++; // Scroll Down -> Next
-                 this._scrollAccumulator = 0; // Reset after switch
-                 didSwitch = true;
-             }
-        }
-        
-        if (didSwitch) {
-            // Clamp to valid range
-            if (newIndex < 0) newIndex = 0;
-            if (newIndex >= nWorkspaces) newIndex = nWorkspaces - 1;
-
-            if (newIndex !== activeIndex) {
-                // Use current time for activation to ensure focus handling is correct
-                wsManager.get_workspace_by_index(newIndex).activate(global.get_current_time());
-                this._lastWorkspaceSwitchTime = now;
-            }
-        }
-    }
-
-    _handleEvent(actor, event) {
-        const type = event.type();
-        const symbol = event.get_key_symbol();
-
-        // Handle ESC (Reset Zoom) - Works without modifier if zoomed in
-        if (type === Clutter.EventType.KEY_PRESS && symbol === Clutter.KEY_Escape) {
-            const currentZoom = this._settings.get_double('mag-factor');
-            if (currentZoom > 1.0) {
-                this._settings.set_double('mag-factor', 1.0);
-                return Clutter.EVENT_STOP;
-            }
-        }
-
-        // --- DYNAMIC MODIFIER SWITCHING ---
-        // Requested behavior:
-        // Super -> Window Action Key = <Super>
-        // Alt -> Window Action Key = <Alt>
-        // Super + Alt -> Window Action Key = <Alt> (Alt takes precedence)
-        if (type === Clutter.EventType.KEY_PRESS || type === Clutter.EventType.KEY_RELEASE) {
-             const isPress = (type === Clutter.EventType.KEY_PRESS);
-             const state = event.get_state();
-
-             const isAltKey = (symbol === Clutter.KEY_Alt_L || symbol === Clutter.KEY_Alt_R);
-             const isSuperKey = (symbol === Clutter.KEY_Super_L || symbol === Clutter.KEY_Super_R);
-
-             // Calculate 'Real' State (State bitmask + current event)
-             const altWasDown = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
-             const superWasDown = (state & Clutter.ModifierType.MOD4_MASK) !== 0;
-
-             let altIsDown = altWasDown;
-             let superIsDown = superWasDown;
-
-             // Update state based on current key event
-             if (isAltKey) altIsDown = isPress;
-             if (isSuperKey) superIsDown = isPress;
-
-             const currentWm = this._wmSettings.get_string('mouse-button-modifier');
-             let targetWm = this._originalWmModifier;
-
-             // Logic: Super > Alt > Default
-             // "Se a tecla super for pressionada... muda pra super"
-             // "Se o alt for pressionado... muda pra alt"
-             if (superIsDown) {
-                 targetWm = '<Super>';
-             } else if (altIsDown) {
-                 targetWm = '<Alt>';
-             }
-
-             if (currentWm !== targetWm) {
-                 this._wmSettings.set_string('mouse-button-modifier', targetWm);
-             }
-        }
-
-        // Check Modifiers for Scrolling
         const state = event.get_state();
-
-        // WORKSPACE SWITCHING LOGIC (Conflict Resolution)
-        // We capture this BEFORE the zoom check to ensure we catch the "Other" key.
-        if (type === Clutter.EventType.SCROLL) {
-            const modKey = this._extensionSettings.get_string('modifier-key');
-            const isAltPressed = (state & Clutter.ModifierType.MOD1_MASK) === Clutter.ModifierType.MOD1_MASK;
-            const isSuperPressed = (state & Clutter.ModifierType.MOD4_MASK) === Clutter.ModifierType.MOD4_MASK;
-
-            let isWorkspaceSwitchIntent = false;
-
-            // Case 1: Zoom is Super-based. Fallback: Alt+Scroll -> Workspace
-            if (modKey === 'super') {
-                if (isAltPressed && !isSuperPressed) {
-                     isWorkspaceSwitchIntent = true;
-                }
-            }
-            // Case 2: Zoom is Alt-based (and NO Super). Fallback: Super+Scroll -> Workspace
-            else if (modKey.includes('alt') && !modKey.includes('super')) {
-                 if (isSuperPressed && !isAltPressed) {
-                      isWorkspaceSwitchIntent = true;
-                 }
-            }
-
-            if (isWorkspaceSwitchIntent) {
-                 this._switchWorkspace(event);
-                 // ALWAYS return STOP if the intent matches, even if we didn't switch yet (accumulator logic).
-                 // This prevents the scroll from "leaking" to the window focused below.
-                 return Clutter.EVENT_STOP;
-            }
-        }
         
-        // We check if ALL required bits are present in the state
-        // (state & required) === required
-        const isModifierPressed = (state & this._requiredModifiers) === this._requiredModifiers;
+        // Verifica modificadores: Precisamos de SUPER (Mod4) E ALT (Mod1)
+        const hasSuper = (state & Clutter.ModifierType.MOD4_MASK) !== 0;
+        const hasAlt = (state & Clutter.ModifierType.MOD1_MASK) !== 0;
 
-        // DEBUG: Uncomment if needed
-        // if (type === Clutter.EventType.SCROLL) {
-        //    console.log(`[Deperto] Scroll. State: ${state}, Required: ${this._requiredModifiers}, Match: ${isModifierPressed}`);
-        // }
-
-        if (!isModifierPressed) {
+        // Se não tiver a combinação exata Super + Alt, deixa o sistema lidar
+        if (!hasSuper || !hasAlt) {
             return Clutter.EVENT_PROPAGATE;
         }
 
-        // Filter only SCROLL (8)
-        if (type !== Clutter.EventType.SCROLL) {
-            return Clutter.EVENT_PROPAGATE;
-        }
-
-        // --- ZOOM LOGIC ---
+        // Lógica de Zoom
         const direction = event.get_scroll_direction();
         let zoomChange = 0;
-        const ZOOM_STEP = 0.25;
-        const now = Date.now();
+        const ZOOM_STEP = 0.25; // Sensibilidade do zoom
 
-        // Scroll Detection
         if (direction === Clutter.ScrollDirection.SMOOTH) {
             const [dx, dy] = event.get_scroll_delta();
-            // Invert dy to be natural (Scroll Down = Zoom Out)
+            // dy negativo é scroll para cima (zoom in)
             zoomChange = -dy * ZOOM_STEP; 
-            this._lastSmoothScrollTime = now;
         } else {
-            // If UP/DOWN (Discrete)
-            // CHECK: If we had a SMOOTH event very recently (e.g. < 50ms), ignore this discrete event
-            if (now - this._lastSmoothScrollTime < 50) {
-                 return Clutter.EVENT_STOP; 
-            }
-
             if (direction === Clutter.ScrollDirection.UP) {
                 zoomChange = ZOOM_STEP;
             } else if (direction === Clutter.ScrollDirection.DOWN) {
@@ -318,16 +91,21 @@ export default class ZoomByScrollExtension extends Extension {
             }
         }
 
-        // Minimum threshold
-        if (Math.abs(zoomChange) < 0.005) return Clutter.EVENT_STOP;
-        
-        let currentZoom = this._settings.get_double('mag-factor');
-        let newZoom = Math.max(1.0, Math.min(20.0, currentZoom + zoomChange));
+        // Evita processamento desnecessário para movimentos minúsculos
+        if (Math.abs(zoomChange) < 0.001) return Clutter.EVENT_STOP;
+
+        // Aplica o novo zoom
+        let currentZoom = this._magSettings.get_double('mag-factor');
+        let newZoom = currentZoom + zoomChange;
+
+        // Limites de segurança (1.0x a 20.0x)
+        if (newZoom < 1.0) newZoom = 1.0;
+        if (newZoom > 20.0) newZoom = 20.0;
 
         if (newZoom !== currentZoom) {
-            this._settings.set_double('mag-factor', newZoom);
+            this._magSettings.set_double('mag-factor', newZoom);
         }
 
-        return Clutter.EVENT_STOP;
+        return Clutter.EVENT_STOP; // Impede que o scroll afete a janela/app abaixo
     }
 }
