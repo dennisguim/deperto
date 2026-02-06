@@ -36,6 +36,9 @@ I realized that `Super + Scroll` is like a sacred relic in GNOME—mess with it.
 
 ## 📦 Installation
 
+### Gnome Extensions
+[https://extensions.gnome.org/extension/9256/deperto-zoom-by-scroll/](https://extensions.gnome.org/extension/9256/deperto-zoom-by-scroll/)
+
 ### Manual Installation
 1. Download this repository.
 2. Copy the folder to your extensions directory:
