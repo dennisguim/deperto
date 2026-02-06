@@ -1,7 +1,8 @@
 {
   "name": "Deperto (Zoom by Scroll)",
-  "description": "Zoom na tela focado no mouse usando Super + Scroll. Projeto Deperto.",
+  "description": "Screen zoom focused on the mouse using a modifier key + Scroll. Deperto Project.",
   "uuid": "deperto@dennisguim.com",
+  "url": "https://github.com/dennisguim/deperto",
   "shell-version": [
     "45",
     "46",
@@ -10,5 +11,8 @@
     "49"
   ],
   "settings-schema": "org.gnome.shell.extensions.deperto",
+  "donations": {
+    "github": "dennisguim"
+  },
   "version": 5
 }
