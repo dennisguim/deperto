@@ -21,6 +21,11 @@ It uses the native GNOME magnifier but forces it to behave like a sane tool: `pr
 2. **Scroll Up** to zoom in (ENHANCE!).
 3. **Scroll Down** to zoom out.
 
+## Video:
+https://github.com/user-attachments/assets/516d87ef-eeae-4f37-bac1-32e70b6a7d20
+
+
+
 ### ⚠️ A Note on "Super + Scroll"
 In standard GNOME, `Super + Scroll` might be used to switch workspaces.
 **Not anymore.**
