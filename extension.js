@@ -134,7 +134,12 @@ export default class ZoomByScrollExtension extends Extension {
         }
 
         regions.forEach(region => {
-            region.setMagFactor(zoomFactor, zoomFactor);
+            region._changeROI({
+                xMagFactor: zoomFactor,
+                yMagFactor: zoomFactor,
+                redoCursorTracking: true,
+                animate: false,
+            });
             // Force proportional tracking so it follows the mouse
             region.setMouseTrackingMode(GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL);
         });
