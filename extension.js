@@ -99,12 +99,6 @@ export default class ZoomByScrollExtension extends Extension {
         if (direction === Clutter.ScrollDirection.SMOOTH) {
             const [dx, dy] = event.get_scroll_delta();
             zoomChange = -dy * ZOOM_STEP; 
-        } else {
-            if (direction === Clutter.ScrollDirection.UP) {
-                zoomChange = ZOOM_STEP;
-            } else if (direction === Clutter.ScrollDirection.DOWN) {
-                zoomChange = -ZOOM_STEP;
-            }
         }
 
         if (Math.abs(zoomChange) < 0.001) return Clutter.EVENT_STOP;
