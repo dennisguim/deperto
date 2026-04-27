@@ -21,8 +21,13 @@ export default class ZoomByScrollExtension extends Extension {
 
         // 3. Internal State
         this._currentZoom = 1.0;
-        
-        // 4. Capture Events
+        this._zoomMonitorIndex = -1;
+
+        // 4. Track monitor layout changes to drop a stale zoom region
+        this._monitorsChangedId = Main.layoutManager.connect(
+            'monitors-changed', this._onMonitorsChanged.bind(this));
+
+        // 5. Capture Events
         this._stageSignalId = global.stage.connect('captured-event', this._onCapturedEvent.bind(this));
     }
 
@@ -39,6 +44,11 @@ export default class ZoomByScrollExtension extends Extension {
         if (this._stageSignalId) {
             global.stage.disconnect(this._stageSignalId);
             this._stageSignalId = null;
+        }
+
+        if (this._monitorsChangedId) {
+            Main.layoutManager.disconnect(this._monitorsChangedId);
+            this._monitorsChangedId = null;
         }
 
         // 2. Disconnect Settings
@@ -123,51 +133,72 @@ export default class ZoomByScrollExtension extends Extension {
     }
 
     _applyZoom(zoomFactor) {
-        this._currentZoom = zoomFactor;
-
         if (!Main.magnifier) {
             console.error("[Deperto] Main.magnifier not found");
             return;
         }
 
-        // Activation/Deactivation
-        if (this._currentZoom > 1.0) {
-            if (!Main.magnifier.isActive()) {
-                Main.magnifier.setActive(true);
-            }
-        } else {
-            if (Main.magnifier.isActive()) {
-                Main.magnifier.setActive(false);
-            }
-        }
+        const wasZoomed = this._currentZoom > 1.0;
+        const willZoom = zoomFactor > 1.0;
 
-        // Apply zoom factor to all regions
-        let regions = Main.magnifier.getZoomRegions();
-        if (regions.length === 0 && this._currentZoom > 1.0) {
-            // If no regions exist but we need zoom, create and add one
-            const [width, height] = global.display.get_size();
-            const roi = { x: 0, y: 0, width, height };
-            const viewPort = { x: 0, y: 0, width, height };
-            const newRegion = Main.magnifier.createZoomRegion(zoomFactor, zoomFactor, roi, viewPort);
-            Main.magnifier.addZoomRegion(newRegion);
-            regions = [newRegion];
-        }
-
-        regions.forEach(region => {
-            // Use _changeROI with configurable animation
+        if (willZoom && !wasZoomed) {
+            // Replace the default region (full virtual desktop) with one bound
+            // to the monitor under the cursor.
+            const target = this._resolveTargetGeometry();
+            Main.magnifier.clearAllZoomRegions();
+            const region = Main.magnifier.createZoomRegion(
+                zoomFactor, zoomFactor, target.geometry, target.geometry);
+            Main.magnifier.addZoomRegion(region);
+            region.setMouseTrackingMode(
+                GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL);
+            Main.magnifier.setActive(true);
+            this._zoomMonitorIndex = target.monitorIndex;
+        } else if (willZoom && wasZoomed) {
             // animate: true is smoother but can lag during rapid scrolling (Issue azacio)
             // animate: false is much faster and more responsive (Issue account1009)
-            region._changeROI({
-                xMagFactor: zoomFactor,
-                yMagFactor: zoomFactor,
-                redoCursorTracking: true,
-                animate: this._smoothZoom,
+            // setMagFactor uses the public API but forces animate=true, so the
+            // non-animated path falls back to _changeROI to preserve responsiveness.
+            Main.magnifier.getZoomRegions().forEach(region => {
+                if (this._smoothZoom) {
+                    region.setMagFactor(zoomFactor, zoomFactor);
+                } else {
+                    region._changeROI({
+                        xMagFactor: zoomFactor,
+                        yMagFactor: zoomFactor,
+                        redoCursorTracking: true,
+                        animate: false,
+                    });
+                }
             });
-            
-            // Ensure proportional tracking so it follows the mouse
-            if (region.getMouseTrackingMode() !== GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL) {
-                region.setMouseTrackingMode(GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL);
-            }
-        });
+        } else if (!willZoom && wasZoomed) {
+            Main.magnifier.setActive(false);
+            Main.magnifier.clearAllZoomRegions();
+            this._zoomMonitorIndex = -1;
+        }
+
+        this._currentZoom = zoomFactor;
+    }
+
+    _resolveTargetGeometry() {
+        const [px, py] = global.get_pointer();
+        const monitor = Main.layoutManager.findMonitorForPoint(px, py)
+            ?? Main.layoutManager.primaryMonitor;
+        return {
+            monitorIndex: monitor.index,
+            geometry: {
+                x: monitor.x,
+                y: monitor.y,
+                width: monitor.width,
+                height: monitor.height,
+            },
+        };
+    }
+
+    _onMonitorsChanged() {
+        if (this._currentZoom <= 1.0) return;
+        Main.magnifier.setActive(false);
+        Main.magnifier.clearAllZoomRegions();
+        this._currentZoom = 1.0;
+        this._zoomMonitorIndex = -1;
     }
 }
