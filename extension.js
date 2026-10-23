@@ -101,6 +101,14 @@ export default class ZoomByScrollExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         }
 
+        // Ignore pointer-emulated scroll events so a single mouse wheel tick
+        // (which in Mutter emits both a discrete UP/DOWN event and an emulated
+        // SMOOTH event) is not applied twice, and touchpad scrolling does not
+        // get hit with extra emulated discrete steps.
+        if (event.is_pointer_emulated()) {
+            return Clutter.EVENT_STOP;
+        }
+
         // Zoom Logic
         const direction = event.get_scroll_direction();
         let zoomChange = 0;
@@ -145,30 +153,61 @@ export default class ZoomByScrollExtension extends Extension {
             // Replace the default region (full virtual desktop) with one bound
             // to the monitor under the cursor.
             const target = this._resolveTargetGeometry();
+            const [px, py] = global.get_pointer();
+
             Main.magnifier.clearAllZoomRegions();
+
+            // Sync pointer coordinates before creating/activating the region
+            Main.magnifier.xMouse = px;
+            Main.magnifier.yMouse = py;
+
+            // Start the region at 1.0x so activation matches the unmagnified
+            // screen 1:1 before transitioning to the target zoomFactor.
             const region = Main.magnifier.createZoomRegion(
-                zoomFactor, zoomFactor, target.geometry, target.geometry);
-            Main.magnifier.addZoomRegion(region);
+                1.0, 1.0, target.geometry, target.geometry);
+
+            // Use monitor-local proportional tracking without GNOME's default 20%
+            // edge padding, keeping the point under the cursor stationary from 1.0x
+            // upwards so the first scroll does not jump the viewport or cursor.
+            region._centerFromPointProportional = (xPoint, yPoint) => {
+                const [, , widthRoi, heightRoi] = region.getROI();
+                const halfWidth = region._viewPortWidth / 2;
+                const halfHeight = region._viewPortHeight / 2;
+                const centerX = region._viewPortX + halfWidth;
+                const centerY = region._viewPortY + halfHeight;
+                const xProportion = Math.max(-1, Math.min(1, (xPoint - centerX) / halfWidth));
+                const yProportion = Math.max(-1, Math.min(1, (yPoint - centerY) / halfHeight));
+                const xPos = centerX + xProportion * (halfWidth - widthRoi / 2);
+                const yPos = centerY + yProportion * (halfHeight - heightRoi / 2);
+                return [xPos, yPos];
+            };
+
+            // Set tracking mode BEFORE addZoomRegion so startTrackingMouse()
+            // does not enter the NONE branch while _mouseActor is still null.
             region.setMouseTrackingMode(
                 GDesktopEnums.MagnifierMouseTrackingMode.PROPORTIONAL);
+            region._followingCursor = true;
+
+            Main.magnifier.addZoomRegion(region);
             Main.magnifier.setActive(true);
             this._zoomMonitorIndex = target.monitorIndex;
+
+            region._changeROI({
+                xMagFactor: zoomFactor,
+                yMagFactor: zoomFactor,
+                redoCursorTracking: true,
+                animate: true,
+            });
         } else if (willZoom && wasZoomed) {
             // animate: true is smoother but can lag during rapid scrolling (Issue azacio)
             // animate: false is much faster and more responsive (Issue account1009)
-            // setMagFactor uses the public API but forces animate=true, so the
-            // non-animated path falls back to _changeROI to preserve responsiveness.
             Main.magnifier.getZoomRegions().forEach(region => {
-                if (this._smoothZoom) {
-                    region.setMagFactor(zoomFactor, zoomFactor);
-                } else {
-                    region._changeROI({
-                        xMagFactor: zoomFactor,
-                        yMagFactor: zoomFactor,
-                        redoCursorTracking: true,
-                        animate: false,
-                    });
-                }
+                region._changeROI({
+                    xMagFactor: zoomFactor,
+                    yMagFactor: zoomFactor,
+                    redoCursorTracking: true,
+                    animate: this._smoothZoom,
+                });
             });
         } else if (!willZoom && wasZoomed) {
             Main.magnifier.setActive(false);
