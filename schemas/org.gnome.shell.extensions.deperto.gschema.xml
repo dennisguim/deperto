@@ -4,7 +4,7 @@
     <key name="modifier-key" type="s">
       <default>'super-alt'</default>
       <summary>Modifier key to activate zoom</summary>
-      <description>The key combination to hold while scrolling to zoom. Options: super-alt, ctrl-super.</description>
+      <description>The key combination to hold while scrolling to zoom. Options: super-alt, ctrl-super, super.</description>
     </key>
     <key name="zoom-step" type="d">
       <default>0.25</default>
@@ -15,6 +15,11 @@
       <default>false</default>
       <summary>Smooth zoom</summary>
       <description>Enable animation when changing zoom levels. This can make the zoom feel smoother but may cause lag during rapid scrolling.</description>
+    </key>
+    <key name="invert-scroll" type="b">
+      <default>false</default>
+      <summary>Invert scroll direction</summary>
+      <description>Reverse the zoom direction (useful for natural scrolling).</description>
     </key>
   </schema>
 </schemalist>

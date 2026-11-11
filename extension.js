@@ -34,6 +34,7 @@ export default class ZoomByScrollExtension extends Extension {
     _updateSettings() {
         this._modifierKey = this._settings.get_string('modifier-key');
         this._zoomStep = this._settings.get_double('zoom-step');
+        this._invertScroll = this._settings.get_boolean('invert-scroll');
         this._smoothZoom = this._settings.get_boolean('smooth-zoom');
     }
 
@@ -88,9 +89,12 @@ export default class ZoomByScrollExtension extends Extension {
 
         let match = false;
 
-        // Check for specific combinations: Super+Alt or Super+Ctrl
+        // Check for specific combinations: Super+Alt, Super+Ctrl or Super only
         if (selectedModifier === 'ctrl-super') {
             match = hasCtrl && hasSuper;
+        } else if (selectedModifier === 'super') {
+            // Super only: ignore if Alt or Ctrl are also held
+            match = hasSuper && !hasAlt && !hasCtrl;
         } else {
             // Default: super-alt
             match = hasSuper && hasAlt;
@@ -124,6 +128,8 @@ export default class ZoomByScrollExtension extends Extension {
                 zoomChange = -ZOOM_STEP;
             }
         }
+
+        if (this._invertScroll) zoomChange = -zoomChange;
 
         if (Math.abs(zoomChange) < 0.001) return Clutter.EVENT_STOP;
 
