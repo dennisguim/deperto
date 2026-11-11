@@ -20,8 +20,8 @@ export default class ZoomByScrollPreferences extends ExtensionPreferences {
         page.add(group);
 
         // Define the available options
-        const optionItems = ['super-alt', 'ctrl-super'];
-        const optionLabels = ['Super + Alt + Scroll', 'Ctrl + Super + Scroll'];
+        const optionItems = ['super-alt', 'ctrl-super', 'super'];
+        const optionLabels = ['Super + Alt + Scroll', 'Ctrl + Super + Scroll', 'Super + Scroll'];
 
         // Create the combo row for modifier key
         const row = new Adw.ComboRow({
@@ -81,6 +81,14 @@ export default class ZoomByScrollPreferences extends ExtensionPreferences {
             'value',
             Gio.SettingsBindFlags.DEFAULT
         );
+
+        // Invert Scroll Toggle (SwitchRow)
+        const invertRow = new Adw.SwitchRow({
+            title: _('Invert Scroll Direction'),
+            subtitle: _('Reverse the zoom direction (e.g. for natural scrolling)'),
+        });
+        behaviorGroup.add(invertRow);
+        settings.bind('invert-scroll', invertRow, 'active', Gio.SettingsBindFlags.DEFAULT);
 
         // Smooth Zoom Toggle (SwitchRow)
         const smoothZoomRow = new Adw.SwitchRow({
